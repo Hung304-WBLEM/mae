@@ -33,6 +33,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import models_mae
 
 from engine_pretrain import train_one_epoch
+from features_classification.datasets import cbis_ddsm, combined_datasets
 
 
 def get_args_parser():
@@ -101,6 +102,10 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
+    # My arguments
+    parser.add_argument("-d", "--dataset",
+                        help="Name of the available datasets")
+
     return parser
 
 
@@ -125,8 +130,21 @@ def main(args):
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    print(dataset_train)
+    # dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+    # print(dataset_train)
+    data_transforms = {
+        'train': transform_train,
+        'val': transform_train,
+        'test': transform_train
+    }
+    if args.dataset in 'five_classes_mass_calc_pathology':
+        _, dataset, _ = cbis_ddsm.initialize(args, data_transforms)
+    elif args.dataset in ['combined_datasets',
+                          'image_lesion_combined_datasets']:
+        _, dataset, _ = combined_datasets.initialize(args, data_transforms)
+
+    dataset_train = dataset['train']
+
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -153,7 +171,8 @@ def main(args):
     )
     
     # define the model
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+    model = models_mae.__dict__[args.model](img_size=args.input_size,
+                                            norm_pix_loss=args.norm_pix_loss)
 
     model.to(device)
 
@@ -194,7 +213,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        if args.output_dir and (epoch % 20 == 0 or epoch + 1 == args.epochs):
+        if args.output_dir and (epoch % 50 == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch)
@@ -217,5 +236,6 @@ if __name__ == '__main__':
     args = get_args_parser()
     args = args.parse_args()
     if args.output_dir:
+        print('here')
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
