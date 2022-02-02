@@ -30,7 +30,7 @@ import timm.optim.optim_factory as optim_factory
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-import models_mae
+import models_mae_custom
 
 from engine_pretrain import train_one_epoch
 from features_classification.datasets import cbis_ddsm, combined_datasets
@@ -139,7 +139,7 @@ def main(args):
     }
     if args.dataset in 'five_classes_mass_calc_pathology':
         _, dataset, _ = cbis_ddsm.initialize(args, data_transforms)
-    elif args.dataset in ['combined_datasets',
+    elif args.dataset in ['combined_datasets', 'aug_combined_datasets',
                           'image_lesion_combined_datasets']:
         _, dataset, _ = combined_datasets.initialize(args, data_transforms)
 
@@ -171,7 +171,7 @@ def main(args):
     )
     
     # define the model
-    model = models_mae.__dict__[args.model](img_size=args.input_size,
+    model = models_mae_custom.__dict__[args.model](img_size=args.input_size,
                                             norm_pix_loss=args.norm_pix_loss)
 
     model.to(device)
