@@ -29,6 +29,7 @@ class MaskedAutoencoderViT(nn.Module):
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False):
         super().__init__()
 
+        self.img_size = img_size
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         self.embed_dim = embed_dim
@@ -255,7 +256,14 @@ class MaskedAutoencoderViT(nn.Module):
         highres_mask_tokens = self.highres_mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
         x_ = torch.cat([x[:, 1:, :], highres_mask_tokens], dim=1)  # no cls token
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
-        x_ = torch.repeat_interleave(x_, 4, dim=1) # (128, 784, 512)
+        # x_ = torch.repeat_interleave(x_, 4, dim=1) # (128, 784, 512)
+        x_ = torch.permute(x_, (0, 2, 1)) # (128, 512, 196)
+        x_ = torch.reshape(x_, (x_.shape[0], x_.shape[1], int(self.patch_embed.num_patches**.5), int(self.patch_embed.num_patches**.5))) # (128, 512, 14, 14)
+        x_ = torch.repeat_interleave(x_, 2, dim=2)
+        x_ = torch.repeat_interleave(x_, 2, dim=3)
+        x_ = torch.flatten(x_, 2) # (128, 512, 768)
+        x_ = torch.permute(x_, (0, 2, 1)) # (128, 768, 512)
+
 
         x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
 
@@ -283,7 +291,7 @@ class MaskedAutoencoderViT(nn.Module):
         """
         target = self.patchify(imgs)
 
-        highres_imgs = F.interpolate(imgs, size=448)
+        highres_imgs = F.interpolate(imgs, size=self.img_size*2)
         highres_target = self.highres_patchify(highres_imgs)
 
         if self.norm_pix_loss:
@@ -303,6 +311,7 @@ class MaskedAutoencoderViT(nn.Module):
         highres_loss = (highres_pred - highres_target) ** 2
         highres_loss = highres_loss.mean(dim=-1)
         highres_loss = (highres_loss * highres_mask).sum() / highres_mask.sum()
+
 
         return loss + highres_loss
 

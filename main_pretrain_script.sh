@@ -1,4 +1,4 @@
-python -m torch.distributed.launch --nproc_per_node=2 main_pretrain.py \
+python -m torch.distributed.launch --nproc_per_node=1 main_pretrain_custom.py \
        --batch_size 30 \
        --model mae_vit_base_patch16 \
        --input_size 224 \
