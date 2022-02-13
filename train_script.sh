@@ -129,7 +129,7 @@
 #     --dataset aug_combined_datasets \
 
 python submitit_pretrain.py \
-    --job_dir jobdir/vit_base_patch16_e500_input112_combined_datasets \
+    --job_dir jobdir/newtest_vit_base_patch16_e500_input112_combined_datasets \
     --ngpus 4 \
     --nodes 1 \
     --timeout 600 \
@@ -142,4 +142,5 @@ python submitit_pretrain.py \
     --warmup_epochs 40 \
     --blr 1.5e-4 --weight_decay 0.05 \
     --partition 'batch' \
+    --seed 42 \
     --dataset combined_datasets \

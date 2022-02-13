@@ -1,15 +1,15 @@
-python submitit_pretrain_custom.py \
-    --job_dir jobdir/highres_nomaskboth_vit_base_patch16_input112_combined_datasets \
+python submitit_pretrain_custom_independent_patches.py \
+    --job_dir jobdir/highres_ip_lr1.5e-3_vit_base_patch16_input112_combined_datasets \
     --ngpus 4 \
     --nodes 1 \
     --timeout 600 \
-    --batch_size 256 \
+    --batch_size 128 \
     --model mae_vit_base_patch16 \
     --input_size 112 \
     --norm_pix_loss \
     --mask_ratio 0.75 \
     --epochs 500 \
     --warmup_epochs 40 \
-    --blr 1.5e-4 --weight_decay 0.05 \
+    --blr 1.5e-3 --weight_decay 0.05 \
     --partition 'batch' \
     --dataset combined_datasets

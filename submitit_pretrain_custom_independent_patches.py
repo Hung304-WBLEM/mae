@@ -12,7 +12,7 @@ import os
 import uuid
 from pathlib import Path
 
-import main_pretrain_custom as trainer
+import main_pretrain_custom_independent_patches as trainer
 import submitit
 
 
@@ -53,7 +53,7 @@ class Trainer(object):
         self.args = args
 
     def __call__(self):
-        import main_pretrain_custom as trainer
+        import main_pretrain_custom_independent_patches as trainer
 
         self._setup_gpu_args()
         trainer.main(self.args)
@@ -106,7 +106,7 @@ def main():
         mem_gb=40 * num_gpus_per_node,
         gpus_per_node=num_gpus_per_node,
         tasks_per_node=num_gpus_per_node,  # one task per GPU
-        cpus_per_task=3,
+        cpus_per_task=4,
         nodes=nodes,
         timeout_min=timeout_min,  # max is 60 * 72
         # Below are cluster dependent parameters
