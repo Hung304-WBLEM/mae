@@ -37,7 +37,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        self.highres_patch_embed = PatchEmbed(patch_size*2, patch_size, in_chans, embed_dim)
+        self.highres_patch_embed = PatchEmbed(patch_size*4, patch_size, in_chans, embed_dim)
         highres_num_patches = self.highres_patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -341,9 +341,15 @@ class MaskedAutoencoderViT(nn.Module):
         # loss = loss.sum() / torch.numel(loss)
 
         highres_loss = (highres_pred - highres_target) ** 2
+        print('highres_loss.shape', highres_loss.shape)
         highres_loss = highres_loss.mean(dim=-1)
+        print('highres_loss.shape', highres_loss.shape)
         highres_loss = (highres_loss * highres_mask).sum() / highres_mask.sum()
+        print('highres_loss.shape', highres_loss.shape)
         # highres_loss = highres_loss.sum() / torch.numel(highres_loss)
+
+        while True:
+            continue
 
         return loss + highres_loss
 

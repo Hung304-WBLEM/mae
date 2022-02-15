@@ -1,5 +1,5 @@
-python submitit_pretrain_custom.py \
-    --job_dir jobdir/highres_circularmask_vit_base_patch16_input112_combined_datasets \
+python submitit_pretrain_custom_multiscales_v2.py \
+    --job_dir jobdir/highres_msv2_vit_base_patch16_input112_combined_datasets \
     --ngpus 4 \
     --nodes 1 \
     --timeout 600 \

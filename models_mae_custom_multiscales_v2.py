@@ -14,7 +14,6 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import cv2
 
 from timm.models.vision_transformer import PatchEmbed, Block
 
@@ -31,13 +30,14 @@ class MaskedAutoencoderViT(nn.Module):
         super().__init__()
 
         self.img_size = img_size
+        self.patch_size = patch_size
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         self.embed_dim = embed_dim
         self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        self.highres_patch_embed = PatchEmbed(img_size*2, patch_size, in_chans, embed_dim)
+        self.highres_patch_embed = PatchEmbed(patch_size*2, patch_size, in_chans, embed_dim)
         highres_num_patches = self.highres_patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -73,12 +73,12 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.highres_decoder_pos_embed = nn.Parameter(torch.zeros(1, highres_num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
-        self.highres_decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
-            for i in range(decoder_depth)])
+        # self.highres_decoder_blocks = nn.ModuleList([
+        #     Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+        #     for i in range(decoder_depth)])
 
-        self.highres_decoder_norm = norm_layer(decoder_embed_dim)
-        self.highres_decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
+        # self.highres_decoder_norm = norm_layer(decoder_embed_dim)
+        # self.highres_decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -161,6 +161,20 @@ class MaskedAutoencoderViT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
         return imgs
 
+    def highres_unpatchify(self, x):
+        """
+        x: (N, L, patch_size**2 *3)
+        imgs: (N, 3, H, W)
+        """
+        p = self.highres_patch_embed.patch_size[0]
+        h = w = int(x.shape[1]**.5)
+        assert h * w == x.shape[1]
+        
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
+        x = torch.einsum('nhwpqc->nchpwq', x)
+        imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
+        return imgs
+
     def random_masking(self, x, mask_ratio):
         """
         Perform per-sample random masking by per-sample shuffling.
@@ -180,34 +194,11 @@ class MaskedAutoencoderViT(nn.Module):
         ids_keep = ids_shuffle[:, :len_keep] # (128, 49)
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
 
-        ######################## Default Mask ###################################
         # generate the binary mask: 0 is keep, 1 is remove
         mask = torch.ones([N, L], device=x.device)
         mask[:, :len_keep] = 0
         # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore)
-
-        ######################## Circular Mask ###################################
-        # def create_circular_mask(h, w, center=None, radius=None):
-        #     import numpy as np
-        #     if center is None: # use the middle of the image
-        #         center = (int(w/2), int(h/2))
-        #     if radius is None: # use the smallest distance between the center and image walls
-        #         radius = min(center[0], center[1], w-center[0], h-center[1])
-
-        #     Y, X = np.ogrid[:h, :w]
-        #     dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
-
-        #     mask = dist_from_center > radius
-        #     mask = mask.astype(int)
-        #     return mask
-
-        # circular_mask = create_circular_mask(   int(self.patch_embed.num_patches**0.5),
-        #                                         int(self.patch_embed.num_patches**0.5))
-        # mask = torch.tensor(circular_mask, device=x.device)
-        # mask = mask[None, :, :]
-        # mask = torch.flatten(mask, 0)
-        # mask = mask.repeat(N, 1)
 
         return x_masked, mask, ids_restore
 
@@ -239,11 +230,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x, mask, ids_restore
 
-    def forward_decoder(self, x, ids_restore):
-        '''
-        x.shape = (128, 50, 768)
-        ids_restore.shape = (128, 196)
-        '''
+    def add_masked_tokens(self, x, ids_restore):
         # embed tokens
         x = self.decoder_embed(x) # (128, 50, 512)
 
@@ -254,6 +241,24 @@ class MaskedAutoencoderViT(nn.Module):
 
         x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token (128, 196, 512)
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
+
+        return x, x_
+
+    def forward_decoder(self, x, ids_restore, x_):
+        '''
+        x.shape = (128, 50, 768)
+        ids_restore.shape = (128, 196)
+        '''
+        # # embed tokens
+        # x = self.decoder_embed(x) # (128, 50, 512)
+
+        # # append mask tokens to sequence
+        # # (1, 1, 512) --> (128, 147, 512)
+        # mask_tokens = self.mask_token.repeat(x.shape[0],
+        #                                      ids_restore.shape[1] + 1 - x.shape[1], 1)
+
+        # x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token (128, 196, 512)
+        # x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
         x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token (128, 197, 512)
 
         # add pos embed
@@ -272,35 +277,46 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward_highres_decoder(self, x, ids_restore):
-        # embed tokens
-        x = self.highres_decoder_embed(x)
+    def forward_highres_decoder(self, x, ids_restore, x_):
+        # # embed tokens
+        # x = self.decoder_embed(x) # (128, 13, 512)
+        # # append mask tokens to sequence
+        # highres_mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+        # x_ = torch.cat([x[:, 1:, :], highres_mask_tokens], dim=1)  # no cls token # (128, 49, 512)
 
-        # append mask tokens to sequence
-        highres_mask_tokens = self.highres_mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
-        x_ = torch.cat([x[:, 1:, :], highres_mask_tokens], dim=1)  # no cls token
-        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
-        # x_ = torch.repeat_interleave(x_, 4, dim=1) # (128, 784, 512)
-        x_ = torch.permute(x_, (0, 2, 1)) # (128, 512, 196)
-        x_ = torch.reshape(x_, (x_.shape[0], x_.shape[1], int(self.patch_embed.num_patches**.5), int(self.patch_embed.num_patches**.5))) # (128, 512, 14, 14)
-        x_ = torch.repeat_interleave(x_, 2, dim=2)
-        x_ = torch.repeat_interleave(x_, 2, dim=3)
-        x_ = torch.flatten(x_, 2) # (128, 512, 768)
-        x_ = torch.permute(x_, (0, 2, 1)) # (128, 768, 512)
+        # x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 49, 512)
 
+        # x_ = torch.permute(x_, (0, 2, 1)) # (128, 512, 196)
+        # x_ = torch.reshape(x_, (x_.shape[0], x_.shape[1], int(self.patch_embed.num_patches**.5), int(self.patch_embed.num_patches**.5))) # (128, 512, 14, 14)
+        # x_ = torch.repeat_interleave(x_, 2, dim=2)
+        # x_ = torch.repeat_interleave(x_, 2, dim=3)
+        # x_ = torch.flatten(x_, 2) # (128, 512, 768)
+        # x_ = torch.permute(x_, (0, 2, 1)) # (128, 768, 512)
 
-        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        x_ = torch.reshape(x_, (x_.shape[0]*x_.shape[1], x_.shape[2])) # (128*49, 512)
+        x_ = x_[:, None, :] # (128*49, 1, 512)
+        x_ = torch.repeat_interleave(x_, self.highres_patch_embed.num_patches, dim=1) # (128*49, 4, 512)
+
+        # x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        x = x[:, :1, :] # (128, 1, 512)
+        x = torch.squeeze(x) # (128, 512)
+
+        x = torch.repeat_interleave(x, self.patch_embed.num_patches, dim=0) # (128*49, 512)
+        x = x[:, None, :] # (128*49, 1, 512)
+
+        # x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        x = torch.cat([x, x_], dim=1)  # append cls token # (128*49, 5, 512)
 
         # add pos embed
         x = x + self.highres_decoder_pos_embed
 
         # apply Transformer blocks
-        for blk in self.highres_decoder_blocks:
+        for blk in self.decoder_blocks:
             x = blk(x)
-        x = self.highres_decoder_norm(x)
+        x = self.decoder_norm(x)
 
         # predictor projection
-        x = self.highres_decoder_pred(x)
+        x = self.decoder_pred(x)
 
         # remove cls token
         x = x[:, 1:, :]
@@ -313,10 +329,16 @@ class MaskedAutoencoderViT(nn.Module):
         pred: [N, L, p*p*3]
         mask: [N, L], 0 is keep, 1 is remove, 
         """
-        target = self.patchify(imgs)
+        target = self.patchify(imgs) # (128, 196, 768)
 
-        highres_imgs = F.interpolate(imgs, size=self.img_size*2)
-        highres_target = self.highres_patchify(highres_imgs)
+        # highres_imgs = F.interpolate(imgs, size=self.img_size*2)
+        # highres_target = self.highres_patchify(highres_imgs)
+        highres_target = target.clone() # (128, 196, 768)
+        highres_target = torch.reshape(highres_target, (target.shape[0]*target.shape[1], target.shape[2])) # (128*196, 768)
+        highres_target = highres_target[:, None, :] # (128*196, 1, 768)
+        highres_imgs = self.highres_unpatchify(highres_target) # (128*196, 3, 16, 16)
+        highres_imgs = F.interpolate(highres_imgs, size=int(self.highres_patch_embed.num_patches**.5)*self.patch_size) # (128*196, 3, 32, 32)
+        highres_target = self.highres_patchify(highres_imgs) # (128*196, 4, 768)
 
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
@@ -330,30 +352,25 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        # loss = loss.sum() / torch.numel(loss) 
+        # loss = loss.sum() / torch.numel(loss)
 
         highres_loss = (highres_pred - highres_target) ** 2
         highres_loss = highres_loss.mean(dim=-1)
-        # highres_loss = (highres_loss * highres_mask).sum() / highres_mask.sum()
-        highres_loss = highres_loss.sum() / torch.numel(highres_loss) 
+        highres_loss = (highres_loss * highres_mask).sum() / highres_mask.sum()
+        # highres_loss = highres_loss.sum() / torch.numel(highres_loss)
 
         return loss + highres_loss
 
     def forward(self, imgs, mask_ratio=0.75):
-        latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio) # mask=(128,196)
+        latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio) # (128, 196)
         # highres_mask = torch.repeat_interleave(mask, 4, dim=1)
+        highres_mask = torch.reshape(mask, (mask.shape[0]*mask.shape[1], 1)) # (128*196, 1)
+        highres_mask = torch.repeat_interleave(highres_mask, self.highres_patch_embed.num_patches, dim=1) # (128*196, 4)
 
-        highres_mask = torch.reshape(mask, 
-                          (mask.shape[0], 
-                          int(self.patch_embed.num_patches**.5), 
-                          int(self.patch_embed.num_patches**.5))) # (128, 14, 14)
-        
-        highres_mask = torch.repeat_interleave(highres_mask, 2, dim=1)
-        highres_mask = torch.repeat_interleave(highres_mask, 2, dim=2)
-        highres_mask = torch.flatten(highres_mask, 1) # (128, 784)
+        embed_latent, latent_with_masked_tokens = self.add_masked_tokens(latent, ids_restore)
+        pred = self.forward_decoder(embed_latent, ids_restore, latent_with_masked_tokens)  # [N, L, p*p*3]
+        highres_pred = self.forward_highres_decoder(embed_latent, ids_restore, latent_with_masked_tokens)  # [N, L, p*p*3]
 
-        pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        highres_pred = self.forward_highres_decoder(latent, ids_restore)  # [N, L, p*p*3]
         loss = self.forward_loss(imgs, pred, highres_pred, mask, highres_mask)
         return loss, pred, mask, highres_pred, highres_mask
 

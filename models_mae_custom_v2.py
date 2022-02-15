@@ -239,11 +239,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x, mask, ids_restore
 
-    def forward_decoder(self, x, ids_restore):
-        '''
-        x.shape = (128, 50, 768)
-        ids_restore.shape = (128, 196)
-        '''
+    def add_masked_tokens(self, x, ids_restore):
         # embed tokens
         x = self.decoder_embed(x) # (128, 50, 512)
 
@@ -254,6 +250,24 @@ class MaskedAutoencoderViT(nn.Module):
 
         x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token (128, 196, 512)
         x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
+
+        return x, x_
+        
+    def forward_decoder(self, x, ids_restore, x_):
+        '''
+        x.shape = (128, 50, 768)
+        ids_restore.shape = (128, 196)
+        '''
+#        # embed tokens
+#        x = self.decoder_embed(x) # (128, 50, 512)
+#
+#        # append mask tokens to sequence
+#        # (1, 1, 512) --> (128, 147, 512)
+#        mask_tokens = self.mask_token.repeat(x.shape[0],
+#                                             ids_restore.shape[1] + 1 - x.shape[1], 1)
+#
+#        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token (128, 196, 512)
+#        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
         x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token (128, 197, 512)
 
         # add pos embed
@@ -272,14 +286,14 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward_highres_decoder(self, x, ids_restore):
-        # embed tokens
-        x = self.highres_decoder_embed(x)
-
-        # append mask tokens to sequence
-        highres_mask_tokens = self.highres_mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
-        x_ = torch.cat([x[:, 1:, :], highres_mask_tokens], dim=1)  # no cls token
-        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
+    def forward_highres_decoder(self, x, ids_restore, x_):
+#        # embed tokens
+#        x = self.highres_decoder_embed(x)
+#
+#        # append mask tokens to sequence
+#        highres_mask_tokens = self.highres_mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+#        x_ = torch.cat([x[:, 1:, :], highres_mask_tokens], dim=1)  # no cls token
+#        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle (128, 196, 512)
         # x_ = torch.repeat_interleave(x_, 4, dim=1) # (128, 784, 512)
         x_ = torch.permute(x_, (0, 2, 1)) # (128, 512, 196)
         x_ = torch.reshape(x_, (x_.shape[0], x_.shape[1], int(self.patch_embed.num_patches**.5), int(self.patch_embed.num_patches**.5))) # (128, 512, 14, 14)
@@ -352,8 +366,11 @@ class MaskedAutoencoderViT(nn.Module):
         highres_mask = torch.repeat_interleave(highres_mask, 2, dim=2)
         highres_mask = torch.flatten(highres_mask, 1) # (128, 784)
 
-        pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        highres_pred = self.forward_highres_decoder(latent, ids_restore)  # [N, L, p*p*3]
+
+        embed_latent, latent_with_masked_tokens = self.add_masked_tokens(latent, ids_restore)
+        
+        pred = self.forward_decoder(embed_latent, ids_restore, latent_with_masked_tokens)  # [N, L, p*p*3]
+        highres_pred = self.forward_highres_decoder(embed_latent, ids_restore, latent_with_masked_tokens)  # [N, L, p*p*3]
         loss = self.forward_loss(imgs, pred, highres_pred, mask, highres_mask)
         return loss, pred, mask, highres_pred, highres_mask
 
