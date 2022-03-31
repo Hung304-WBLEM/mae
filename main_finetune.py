@@ -30,13 +30,14 @@ from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset
+from util.datasets import build_dataset, build_transform
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_vit
 
 from engine_finetune import train_one_epoch, evaluate
+from features_classification.datasets import cbis_ddsm, combined_datasets, cub_200_2011
 
 
 def get_args_parser():
@@ -152,6 +153,10 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
+    # My arguments
+    parser.add_argument("-d", "--dataset",
+                        help="Name of the available datasets")
+
     return parser
 
 
@@ -170,8 +175,25 @@ def main(args):
 
     cudnn.benchmark = True
 
-    dataset_train = build_dataset(is_train=True, args=args)
-    dataset_val = build_dataset(is_train=False, args=args)
+    # dataset_train = build_dataset(is_train=True, args=args)
+    # dataset_val = build_dataset(is_train=False, args=args)
+
+    data_transforms = {
+        'train': build_transform(True, args),
+        'val': build_transform(False, args),
+        'test': build_transform(False, args)
+    }
+
+    if args.dataset in 'five_classes_mass_calc_pathology':
+        _, dataset, _ = cbis_ddsm.initialize(args, data_transforms)
+    elif args.dataset in ['combined_datasets', 'aug_combined_datasets',
+                          'image_lesion_combined_datasets']:
+        _, dataset, _ = combined_datasets.initialize(args, data_transforms)
+    elif args.dataset in ['cub_200_2011']:
+        _, dataset, _ = cub_200_2011.initialize(args, data_transforms)
+
+    dataset_train = dataset['train']
+    dataset_val = dataset['val']
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -307,6 +329,15 @@ def main(args):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
+    max_accuracy_top5 = 0.0
+
+    best_args = None
+    best_model = None
+    best_model_without_ddp = None
+    best_optimizer = None
+    best_loss_scaler = None
+    best_epoch = None
+
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -317,15 +348,29 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        if args.output_dir:
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch)
+
+        # if args.output_dir:
+        #     misc.save_model(
+        #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+        #         loss_scaler=loss_scaler, epoch=epoch)
 
         test_stats = evaluate(data_loader_val, model, device)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        max_accuracy = max(max_accuracy, test_stats["acc1"])
-        print(f'Max accuracy: {max_accuracy:.2f}%')
+
+        if (test_stats['acc1'] > max_accuracy) \
+        or (test_stats['acc1'] == max_accuracy and test_stats['acc5'] > max_accuracy_top5):
+            best_args = args
+            best_model = model
+            best_model_without_ddp = model_without_ddp
+            best_optimizer = optimizer
+            best_loss_scaler = loss_scaler
+            best_epoch = epoch
+
+            max_accuracy = max(max_accuracy, test_stats["acc1"])
+            print(f'Max accuracy: {max_accuracy:.2f}%')
+
+            max_accuracy_top5 = max(max_accuracy_top5, test_stats["acc5"])
+            print(f'Max accuracy top-5: {max_accuracy_top5:.2f}%')
 
         if log_writer is not None:
             log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
@@ -342,6 +387,10 @@ def main(args):
                 log_writer.flush()
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
+
+    misc.save_model(
+        args=best_args, model=best_model, model_without_ddp=best_model_without_ddp, optimizer=best_optimizer,
+        loss_scaler=best_loss_scaler, epoch=best_epoch)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

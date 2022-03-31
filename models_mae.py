@@ -210,7 +210,8 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        loss = loss.sum() / torch.numel(loss) 
         return loss
 
     def forward(self, imgs, mask_ratio=0.75):

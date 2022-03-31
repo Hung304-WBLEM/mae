@@ -40,14 +40,18 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
-    for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    # for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, data_info in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
-        samples = samples.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
+        # samples = samples.to(device, non_blocking=True)
+        # targets = targets.to(device, non_blocking=True)
+
+        samples = data_info['image'].to(device, non_blocking=True)
+        targets = data_info['label'].to(device, non_blocking=True)
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
@@ -105,11 +109,16 @@ def evaluate(data_loader, model, device):
     # switch to evaluation mode
     model.eval()
 
-    for batch in metric_logger.log_every(data_loader, 10, header):
-        images = batch[0]
-        target = batch[-1]
-        images = images.to(device, non_blocking=True)
-        target = target.to(device, non_blocking=True)
+    # for batch in metric_logger.log_every(data_loader, 10, header):
+    for data_info in metric_logger.log_every(data_loader, 10, header):
+        # images = batch[0]
+        # target = batch[-1]
+
+        # images = images.to(device, non_blocking=True)
+        # target = target.to(device, non_blocking=True)
+
+        images = data_info['image'].to(device, non_blocking=True)
+        target = data_info['label'].to(device, non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast():

@@ -33,7 +33,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import models_mae
 
 from engine_pretrain import train_one_epoch
-from features_classification.datasets import cbis_ddsm, combined_datasets
+from features_classification.datasets import cbis_ddsm, combined_datasets, cub_200_2011
 
 
 def get_args_parser():
@@ -142,6 +142,8 @@ def main(args):
     elif args.dataset in ['combined_datasets', 'aug_combined_datasets',
                           'image_lesion_combined_datasets']:
         _, dataset, _ = combined_datasets.initialize(args, data_transforms)
+    elif args.dataset in ['cub_200_2011']:
+        _, dataset, _ = cub_200_2011.initialize(args, data_transforms)
 
     dataset_train = dataset['train']
 

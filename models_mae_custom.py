@@ -181,33 +181,33 @@ class MaskedAutoencoderViT(nn.Module):
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
 
         ######################## Default Mask ###################################
-        # generate the binary mask: 0 is keep, 1 is remove
-        mask = torch.ones([N, L], device=x.device)
-        mask[:, :len_keep] = 0
-        # unshuffle to get the binary mask
-        mask = torch.gather(mask, dim=1, index=ids_restore)
+        # # generate the binary mask: 0 is keep, 1 is remove
+        # mask = torch.ones([N, L], device=x.device)
+        # mask[:, :len_keep] = 0
+        # # unshuffle to get the binary mask
+        # mask = torch.gather(mask, dim=1, index=ids_restore)
 
         ######################## Circular Mask ###################################
-        # def create_circular_mask(h, w, center=None, radius=None):
-        #     import numpy as np
-        #     if center is None: # use the middle of the image
-        #         center = (int(w/2), int(h/2))
-        #     if radius is None: # use the smallest distance between the center and image walls
-        #         radius = min(center[0], center[1], w-center[0], h-center[1])
+        def create_circular_mask(h, w, center=None, radius=None):
+            import numpy as np
+            if center is None: # use the middle of the image
+                center = (int(w/2), int(h/2))
+            if radius is None: # use the smallest distance between the center and image walls
+                radius = min(center[0], center[1], w-center[0], h-center[1])
 
-        #     Y, X = np.ogrid[:h, :w]
-        #     dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
+            Y, X = np.ogrid[:h, :w]
+            dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
 
-        #     mask = dist_from_center > radius
-        #     mask = mask.astype(int)
-        #     return mask
+            mask = dist_from_center > radius
+            mask = mask.astype(int)
+            return mask
 
-        # circular_mask = create_circular_mask(   int(self.patch_embed.num_patches**0.5),
-        #                                         int(self.patch_embed.num_patches**0.5))
-        # mask = torch.tensor(circular_mask, device=x.device)
-        # mask = mask[None, :, :]
-        # mask = torch.flatten(mask, 0)
-        # mask = mask.repeat(N, 1)
+        circular_mask = create_circular_mask(   int(self.patch_embed.num_patches**0.5),
+                                                int(self.patch_embed.num_patches**0.5))
+        mask = torch.tensor(circular_mask, device=x.device)
+        mask = mask[None, :, :]
+        mask = torch.flatten(mask, 0)
+        mask = mask.repeat(N, 1)
 
         return x_masked, mask, ids_restore
 

@@ -25,15 +25,15 @@ import torchvision.datasets as datasets
 import timm
 
 assert timm.__version__ == "0.3.2"  # version check
-import timm.optim.optim_factory as optim_factory 
+import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-import models_mae_custom_multiscales_v2 as models_mae_custom_ms_v2
+import models_mae_custom_v3_nystromer
 
-from engine_pretrain_custom import train_one_epoch
-from features_classification.datasets import cbis_ddsm, combined_datasets
+from engine_pretrain import train_one_epoch
+from features_classification.datasets import cbis_ddsm, combined_datasets, cub_200_2011
 
 
 def get_args_parser():
@@ -88,7 +88,7 @@ def get_args_parser():
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--num_workers', default=8, type=int)
+    parser.add_argument('--num_workers', default=12, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
@@ -142,6 +142,8 @@ def main(args):
     elif args.dataset in ['combined_datasets', 'aug_combined_datasets',
                           'image_lesion_combined_datasets']:
         _, dataset, _ = combined_datasets.initialize(args, data_transforms)
+    elif args.dataset in ['cub_200_2011']:
+        _, dataset, _ = cub_200_2011.initialize(args, data_transforms)
 
     dataset_train = dataset['train']
 
@@ -171,7 +173,7 @@ def main(args):
     )
     
     # define the model
-    model = models_mae_custom_ms_v2.__dict__[args.model](img_size=args.input_size,
+    model = models_mae_custom_v3_nystromer.__dict__[args.model](img_size=args.input_size,
                                             norm_pix_loss=args.norm_pix_loss)
 
     model.to(device)

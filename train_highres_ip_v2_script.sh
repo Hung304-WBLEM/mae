@@ -1,10 +1,9 @@
-python submitit_pretrain_custom_multiscales_v2.py \
-    --job_dir jobdir/highres_msv2_fixed-size_vit_base_patch16_input112_combined_datasets \
+python submitit_pretrain_custom_independent_patches_v2.py \
+    --job_dir jobdir/highres_v2_ip_vit_base_patch16_input112_combined_datasets \
     --ngpus 4 \
     --nodes 1 \
-    --timeout 1200 \
-    --batch_size 32 \
-    --accum_iter 8 \
+    --timeout 600 \
+    --batch_size 256 \
     --model mae_vit_base_patch16 \
     --input_size 112 \
     --norm_pix_loss \

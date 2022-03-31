@@ -343,8 +343,8 @@ class MaskedAutoencoderViT(nn.Module):
 
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        # loss = loss.sum() / torch.numel(loss) 
+        # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        loss = loss.sum() / torch.numel(loss) 
 
         highres_loss = (highres_pred - highres_target) ** 2
         highres_loss = highres_loss.mean(dim=-1)
